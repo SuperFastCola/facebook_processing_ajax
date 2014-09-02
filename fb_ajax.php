@@ -9,20 +9,19 @@ define('MAIN_DIRECTORY', preg_replace("/includes/i","",dirname(realpath(__FILE__
 define('UPLOAD_SUBDIRECTORY', "uploads/"); // need to add trailing slash
 define('COMPOSED_SUBDIRECTORY', "composed_images/"); // need to add trailing slash
 
-if(preg_match("/hhsecure\.com/",$_SERVER['HTTP_HOST'])){
+//if(preg_match("/(hhsecure|yourhyphenatedlife)\.com/",$_SERVER['HTTP_HOST'])){
 	$image_placment_directory = "/";
-}
+/*}
 else{
-	$image_placment_directory = "/staging/";
-}
+	$image_placment_directory = "/staging/fyi/";
+}*/
 
-define('UPLOAD_URL_BASE', "https://" . $_SERVER['HTTP_HOST'] . $image_placment_directory . UPLOAD_SUBDIRECTORY); // need to add trailing slash
-define('COMPOSED_URL_BASE', "https://" . $_SERVER['HTTP_HOST'] . $image_placment_directory . COMPOSED_SUBDIRECTORY); // need to add trailing slash
+
+define('UPLOAD_URL_BASE', "//" . $_SERVER['HTTP_HOST'] . $image_placment_directory . UPLOAD_SUBDIRECTORY); // need to add trailing slash
+define('COMPOSED_URL_BASE', "//" . $_SERVER['HTTP_HOST'] . $image_placment_directory . COMPOSED_SUBDIRECTORY); // need to add trailing slash
 
 require_once(MAIN_DIRECTORY . "config.php");
 require_once(FB_DOCUMENT_ROOT . "image.functions_v2.php");
-
-//verot.net class
 require_once(FB_DOCUMENT_ROOT . "class.upload.php");
 
 //this has to be declared in outermost scope
@@ -41,7 +40,27 @@ function getUserIDSaveTokenToSession(){
     $user_profile = json_decode(curlget($userinfourl . $_REQUEST['access_token']));
 
     if(isset($user_profile->id)){
+/*    	$userurl = stripslashes($user_profile->link);
 
+    	$ch = curl_init();
+    	curl_setopt($ch, CURLOPT_URL, $userurl);
+    	curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+		curl_exec($ch);
+		
+		$url = curl_getinfo($ch, CURLINFO_EFFECTIVE_URL);
+		curl_close($ch);
+
+		error_log($userurl);*/
+
+		//get long lived access token
+		//https://developers.facebook.com/docs/facebook-login/access-tokens
+		/*
+		GET /oauth/access_token?  
+		    grant_type=fb_exchange_token&           
+		    client_id={app-id}&
+		    client_secret={app-secret}&
+		    fb_exchange_token={short-lived-token} 
+		*/
 	    $_SESSION["user_id"] = $user_profile->id;
 
 	    //submit access token to gte long lived token
@@ -146,13 +165,14 @@ function getAlbums($return_object=false){
 	}
 	else{
 		
-		$fqlquery = '{"query1":"SELECT+cover_pid,aid,name,like_info,comment_info+FROM+album+WHERE+owner='. $_SESSION["user_id"] . '","query2":"SELECT+src,aid+FROM+photo+WHERE+pid+IN+' . $enc["pl"] . 'SELECT+cover_pid+FROM+' . $enc["pound"]  .'query1' .  	$enc["pr"] . '"}&access_token=' . $_SESSION["access_token"];
-		$token_url = 'https://graph.facebook.com/fql?q=' . $fqlquery;	
+		$fqlquery = '{"query1":"SELECT+cover_pid,aid,created,visible,photo_count,is_user_facing,type,modified,modified_major,name,like_info,comment_info+FROM+album+WHERE+owner='. $_SESSION["user_id"] . '","query2":"SELECT+src,aid+FROM+photo+WHERE+pid+IN+' . $enc["pl"] . 'SELECT+cover_pid+FROM+' . $enc["pound"]  .'query1' .  	$enc["pr"] . '"}&access_token=' . $_SESSION["access_token"];
+		$token_url = 'https://graph.facebook.com/v2.0/fql?q=' . $fqlquery;	
 		$response = curlget($token_url);
 		
 		//for testing
 		$data = json_decode($response);
-		//error_log(json_encode($data) . "\n\n");	
+
+		file_put_contents(FB_DOCUMENT_ROOT . $_SESSION["user_id"] . "_albums", json_encode($response));
 		
 		if(checkOAuthError($data)){
 
@@ -218,7 +238,15 @@ function getAlbums($return_object=false){
 					return $data;
 				}
 				
-	
+				/*$i=0;
+				foreach($newAlbum as $album){
+					echo '<div class="albumcover">';
+					echo '<span>'. (string) $album[0]  .  '</span>';
+					echo '<div class="coverholder">';
+					echo '<img src="'. $album[1]  .  '" id="' . $album[2]  . '"/>';
+					echo '</div>';
+					echo '</div>';
+				}//end foreach*/
 			}// end if
 			else{
 				echo createLoginURL();
@@ -229,7 +257,7 @@ function getAlbums($return_object=false){
 }
 
 
-function getMostPopularPhotos(){
+/*function getMostPopularPhotos(){
 
 	$albums = getAlbums(true);
 
@@ -239,6 +267,9 @@ function getMostPopularPhotos(){
 	else{		
 
 		$albums = getAlbums(true);
+
+		//error_log(json_encode($albums));
+
 		$last_number = 0;
 		$album_ids = array();
 
@@ -269,6 +300,17 @@ function getMostPopularPhotos(){
 					$last_number = $a->comment_info->comment_count;
 				}
 				else if($a->comment_info->comment_count>0){
+					$album_ids[] = $a->aid;
+				}
+			}
+		}
+		
+		// if sizeof($albums) still less than 5 add albums with no comments
+		if(sizeof($album_ids)<5){
+
+			foreach($albums->data[0]->fql_result_set as $a){
+				
+				if(!array_search($a->aid,$album_ids)){
 					$album_ids[] = $a->aid;
 				}
 			}
@@ -309,19 +351,131 @@ function getMostPopularPhotos(){
 
 		//reduces array to 5 indexes
 		$photos_to_use = array_slice($photos_to_use, 0,5);
-
+		
 		$index = 0;
 		$object_id = 1;
 		$initial_photos = new stdClass();
 
 		//place top 5 photos on server
-		foreach($_SESSION["filenames"] as $name){
+		foreach($_SESSION["filenames"] as $key => $name){
 			$id = "edit_" . $object_id;
 
-			if(isset($initial_photos->{$id})){
+			//if(isset($initial_photos->{$id})){
+			if(($key == $id)&&(isset($photos_to_use[$index]))){
 				$initial_photos->{$id} = new stdClass();
 				$initial_photos->{$id}->id = $id;
 				$initial_photos->{$id}->src = placeFacebookPhotoOnServer($photos_to_use[$index][0],$id,true);
+			}
+			
+			$object_id++;
+			$index++;
+		}
+
+		echo json_encode($initial_photos);
+	}
+	
+}*/
+
+function getMostPopularPhotos_v2(){
+
+	$albums = getAlbums(true);
+
+	if(!isset($albums->data[0])){
+			echo json_encode(array("error"=>createLoginURL()));
+	}
+	else{		
+
+		$albums = getAlbums(true);
+
+		$last_number = 0;
+		$album_ids = array();
+
+		$photos_to_use = array();
+		$photo_pids = array();
+
+		//gets photos albums with top likes
+		foreach($albums->data[0]->fql_result_set as $a){
+
+			//if($a->like_info->like_count>0){
+				//gets album id and adds like and comment counts together
+				//adds to all album holder
+				$album_ids[] = array("aid"=>$a->aid,"comparison"=>$a->like_info->like_count + $a->comment_info->comment_count);
+			/*}
+			else{
+				//if no likes or comments
+				//adds to all fall back album holder
+				//this holder will be sorted by modified date
+				$fallback_album_ids[] = array("aid"=>$a->aid,"comparison"=>$a->modified_major);	
+			}*/
+			
+		}
+
+		//http://www.the-art-of-web.com/php/sortarray/
+		function compareArrays($a, $b)
+	  	{
+	    	return strnatcmp($a['comparison'], $b['comparison']);
+	  	}
+
+	  	// sort numerically ascending by total of likes and comments
+	  	usort($album_ids, 'compareArrays');
+
+	  	// revserse array to be descending by total of likes and comments
+	  	$album_ids = array_reverse($album_ids);
+
+		// if sizeof($albums) still less than 5 add albums with no comments
+		/*if(sizeof($album_ids)<5){
+			//sort numerically ascending by modified date
+	  		usort($fallback_album_ids, 'compareArrays');
+	  		// revserse array to be descending by modified date
+	  		$fallback_album_ids = array_reverse($fallback_album_ids);
+	  		$album_ids = array_merge((array)$album_ids, (array)$fallback_album_ids);
+		}*/
+
+
+		//reduces array to 5 indexes
+		//$album_ids = array_slice($album_ids, 0,5);
+
+		// error_log(json_encode($album_ids));
+		// error_log("--------");
+
+		$photos_to_use = array();
+
+		//retrieves photos from each album
+		//holds in an array
+		foreach($album_ids as $aid){
+			$photos_in_album = getAlbumPhotos($aid["aid"],true);
+
+			foreach($photos_in_album->data[0]->fql_result_set as $p){
+
+				//gets photo id and adds likes and comments of photos together for sorting
+				$photos_to_use[] = array("pid"=>$p->pid,"comparison"=>$p->like_info->like_count + $p->comment_info->comment_count,"src"=>$p->src,"src_big"=>$p->src_big);
+			}
+		}
+
+		// sort numerically ascending by total of likes and comments
+		usort($photos_to_use, 'compareArrays');
+	  	// revserse array to be descending by modified date
+	  	$photos_to_use = array_reverse($photos_to_use);
+
+		//reduces array to 5 indexes
+		$photos_to_use = array_slice($photos_to_use, 0,5);
+
+		// error_log(json_encode($photos_to_use));
+		// error_log("|||||||||||||");
+		
+		$index = 0;
+		$object_id = 1;
+		$initial_photos = new stdClass();
+
+		//place top 5 photos on server
+		foreach($_SESSION["filenames"] as $key => $name){
+			$id = "edit_" . $object_id;
+
+			//if(isset($initial_photos->{$id})){
+			if(($key == $id)&&(isset($photos_to_use[$index]))){
+				$initial_photos->{$id} = new stdClass();
+				$initial_photos->{$id}->id = $id;
+				$initial_photos->{$id}->src = placeFacebookPhotoOnServer($photos_to_use[$index]["src_big"],$id,true);
 			}
 			
 			$object_id++;
@@ -343,10 +497,22 @@ function getAlbumPhotos($albumid,$return_object = false){
 	else{
 		
 		$fqlquery = '{"query1":"SELECT+created,src,comment_info,like_info,src_big,pid+FROM+photo+WHERE+aid=\''.  $albumid .  '\'"}&access_token=' . $_SESSION['access_token']; 
-		$token_url = 'https://graph.facebook.com/fql?q=' . $fqlquery;
+		$token_url = 'https://graph.facebook.com/v2.0/fql?q=' . $fqlquery;
 		
 		$response = curlget($token_url);
-		$data = json_decode($response);		
+		$data = json_decode($response);	
+
+
+		$user_photos_file = FB_DOCUMENT_ROOT . $_SESSION["user_id"] . "_photos";
+		$user_photos = "";
+
+		if(file_exists($user_photos_file)){
+			$user_photos = file_get_contents($user_photos_file);
+		}
+		
+		$user_photos .= json_encode($response);
+		file_put_contents($user_photos_file,$user_photos);	
+
 					
 		if(checkOAuthError($data)){
 			echo json_encode(array("error"=>createLoginURL()));
@@ -399,7 +565,7 @@ function getPhotos($photoid,$title){
 	}
 	else{
 		$fqlquery = '{"query1":"SELECT+created,images,src_big,comment_info,like_info,pid+FROM+photo+WHERE+pid=\''.  $photoid .  '\'"}&access_token=' . $_SESSION['access_token']; 
-		$token_url = 'https://graph.facebook.com/fql?q=' . $fqlquery;
+		$token_url = 'https://graph.facebook.com/v2.0/fql?q=' . $fqlquery;
 				
 		$response = curl_get_file_contents($token_url);	
 		$data = json_decode($response);
@@ -571,8 +737,8 @@ function cropImageMultiple($cropdata,$title_text,$background_color = "#81a99e"){
 	$photo_coordinates[] = array(10,11); //edit 1
 	$photo_coordinates[] = array(248,101); //edit 2
 	$photo_coordinates[] = array(335,11); //edit 3
-	$photo_coordinates[] = array(539,11); //edit 4
-	$photo_coordinates[] = array(627,11); //edit 5
+	$photo_coordinates[] = array(540,11); //edit 4
+	$photo_coordinates[] = array(629,11); //edit 5
 
 	$static_coordinates = array();
 	$static_coordinates[] = array(187,13); //static 1 = b1
@@ -582,10 +748,10 @@ function cropImageMultiple($cropdata,$title_text,$background_color = "#81a99e"){
 	//for static mosaic imagery for edit_1 thru edit_5
 	$mosaic_coordinates_editable = array();
 	$mosaic_coordinates_editable[] = array(12,13); //edit 1 = a1
-	$mosaic_coordinates_editable[] = array(291,119); //edit 2 = c2
+	$mosaic_coordinates_editable[] = array(290,119); //edit 2 = c2
 	$mosaic_coordinates_editable[] = array(394,13); //edit 3 = a2
-	$mosaic_coordinates_editable[] = array(633,13); //edit 4 = c3
-	$mosaic_coordinates_editable[] = array(736,13); //edit 5 = c4
+	$mosaic_coordinates_editable[] = array(634,13); //edit 4 = c3
+	$mosaic_coordinates_editable[] = array(738,13); //edit 5 = c4
 
 	$a_size = array(234,207);
 	$b_size = array(202,101);
@@ -622,11 +788,17 @@ function cropImageMultiple($cropdata,$title_text,$background_color = "#81a99e"){
 			
 			if(preg_match("/edit/i",$i["object_id"])){
 				$indice = (integer) preg_replace("/edit_/i","",$i["object_id"]);
-				$coordinates = $mosaic_coordinates_editable[$indice - 1];
+
+				if(isset($mosaic_coordinates_editable[$indice - 1])){
+					$coordinates = $mosaic_coordinates_editable[$indice - 1];	
+				}
+				
 			}
 			else{
 				$indice = (integer) preg_replace("/static_/i","",$i["object_id"]);
-				$coordinates = $static_coordinates[$indice - 1];
+				if(isset($static_coordinates[$indice - 1])){
+					$coordinates = $static_coordinates[$indice - 1];
+				}
 			}
 			
 			//if mosaic image and over facebook photo
@@ -648,37 +820,68 @@ function cropImageMultiple($cropdata,$title_text,$background_color = "#81a99e"){
 			$crop_source_size = list($width, $height) = getimagesize($filelocation_local);
 			$crop_source = imagecreatefromjpeg($filelocation_local);
 
-			$resized_for_crop = imagecreatetruecolor($i["imageprops"]["width"],$i["imageprops"]["height"]);
-			imagecopyresampled($resized_for_crop,$crop_source,0,0,0,0,$i["imageprops"]["width"],$i["imageprops"]["height"],$crop_source_size[0],$crop_source_size[1]);
+			$resized_for_crop = imagecreatetruecolor($i["imageprops"]["width_larger"],$i["imageprops"]["height_larger"]);
 
-			$resized_file = MAIN_DIRECTORY . UPLOAD_SUBDIRECTORY . $filename_key . "_resized.png";
+			imagecopyresampled($resized_for_crop,$crop_source,0,0,0,0,$i["imageprops"]["width_larger"],$i["imageprops"]["height_larger"],$crop_source_size[0],$crop_source_size[1]);
 
-			$crop_destination_width = $i["imageprops"]["width"] - ($i["cropamounts"]["left"] + $i["cropamounts"]["right"]);
-			$crop_destination_height = $i["imageprops"]["height"] - ($i["cropamounts"]["top"] + $i["cropamounts"]["bottom"]); 
+			//http://php.net/manual/en/function.imageconvolution.php
+			//from user magilvia - User Contributed Notes
+			//sharpen cropped image
+			$sharpenMatrix = array 
+            ( 
+                array(-1.2, -1, -1.2), 
+                array(-1, 30, -1), 
+                array(-1.2, -1, -1.2) 
+            ); 
 
-			$crop_destination = imagecreatetruecolor($crop_destination_width,$crop_destination_height);
+            // calculate the sharpen divisor 
+            $divisor = array_sum(array_map('array_sum', $sharpenMatrix));            
 
-			imagesavealpha($crop_destination, true);
-    		$trans_colour = imagecolorallocatealpha($crop_destination, 255, 0, 0, 127);
-   			imagefill($crop_destination, 0, 0, $trans_colour);
+            $offset = 0; 
+            
+            // apply the matrix 
+            imageconvolution($resized_for_crop, $sharpenMatrix, $divisor, $offset); 
+
+			//$resized_file = MAIN_DIRECTORY . UPLOAD_SUBDIRECTORY . $filename_key . "_resized.png";
+
+			// $crop_destination_width = $i["imageprops"]["width"] - ($i["cropamounts"]["left"] + $i["cropamounts"]["right"]);
+			// $crop_destination_height = $i["imageprops"]["height"] - ($i["cropamounts"]["top"] + $i["cropamounts"]["bottom"]); 
+
+			// $crop_destination_width = $i["imageprops"]["width_larger"] - ($i["cropamounts"]["left_larger"] + $i["cropamounts"]["right_larger"]);
+			// $crop_destination_height = $i["imageprops"]["height_larger"] - ($i["cropamounts"]["top_larger"] + $i["cropamounts"]["bottom_larger"]); 
 
 			//imagecopyresampled($crop_destination,$resized_for_crop,0,0,$i["cropamounts"]["top"],$i["cropamounts"]["left"],$crop_destination_width,$crop_destination_height,$i["imageprops"]["width"],$i["imageprops"]["height"]);
 
-			$pos_left = $i["cropamounts"]["left"];
-			$pos_top = $i["cropamounts"]["top"];
+			// $pos_left = $i["cropamounts"]["left"];
+			// $pos_top = $i["cropamounts"]["top"];
+
+			$pos_left = $i["cropamounts"]["left_larger"];
+			$pos_top = $i["cropamounts"]["top_larger"];
 
 			$dest_x = ($pos_left<0)?$pos_left*-1:0;
 			$dest_y = ($pos_top<0)?$pos_top*-1:0;
 			$source_x = ($pos_left<0)?0:$pos_left;
 			$source_y = ($pos_top<0)?0:$pos_top;
 
-			imagecopy($crop_destination,$resized_for_crop,$dest_x,$dest_y,$source_x,$source_y,$i["imageprops"]["width"],$i["imageprops"]["height"]);
+			//error_log($i["object_id"] . " DX: " . $dest_x." DY: ".$dest_y." SX: ".$source_x." SY: ".$source_y);
+
+			//error_log($i["object_id"] . ": " . $i["imageprops"]["width_larger"] . "  " . ($i["imageprops"]["width_larger"] - $source_x));
+			//error_log($i["object_id"] . ": " . $i["imageprops"]["height_larger"] . "  " . ($i["imageprops"]["height_larger"] - $source_y));
+
+			$crop_destination_width = $i["imageprops"]["width_larger"] - ($i["cropamounts"]["left_larger"] + $i["cropamounts"]["right_larger"]);
+			$crop_destination_height = $i["imageprops"]["height_larger"] - ($i["cropamounts"]["top_larger"] + $i["cropamounts"]["bottom_larger"]);
+			$crop_destination = imagecreatetruecolor($crop_destination_width,$crop_destination_height);
+
+			imagesavealpha($crop_destination,true);
+			$trans_colour = imagecolorallocatealpha($crop_destination, 255, 255, 255, 127);
+			imagefill($crop_destination, 0, 0, $trans_colour);
+
+			//imagecopy($crop_destination,$resized_for_crop,$dest_x,$dest_y,$source_x,$source_y,$i["imageprops"]["width"],$i["imageprops"]["height"]);
+			imagecopy($crop_destination,$resized_for_crop,$dest_x,$dest_y,$source_x,$source_y,$i["imageprops"]["width_larger"] - $source_x,$i["imageprops"]["height_larger"] - $source_y);
 
 			$destinationfile = MAIN_DIRECTORY . UPLOAD_SUBDIRECTORY . $filename_key . "_crop.png";
 
-			deleteImageFile($destinationfile);
-
-		   	imagepng($crop_destination, $destinationfile,9);
+		   	imagepng($crop_destination, $destinationfile,0);
 
 			imagedestroy($crop_source);
 		   	imagedestroy($crop_destination);
@@ -686,8 +889,13 @@ function cropImageMultiple($cropdata,$title_text,$background_color = "#81a99e"){
 
 		   	//$output[] = '"user":"' . $filelocation_url . $handle->file_dst_name . '?t=' .  time() . '"';
 			$indice = (integer) preg_replace("/edit_/i","",$i["object_id"]);
-			$coordinates = $photo_coordinates[$indice - 1];
+			$coordinates = $mosaic_coordinates_editable[$indice - 1];
 			$photo_to_place[] = array($destinationfile,$coordinates,false,false,$i["object_id"]);
+
+			//deletes the editable local file
+			error_log("Delete Uploaded Image: " . $filelocation_local);
+			deleteImageFile($filelocation_local);
+
 
 
 	/*	  if($handle->uploaded){
@@ -729,6 +937,8 @@ function cropImageMultiple($cropdata,$title_text,$background_color = "#81a99e"){
 
 	//error_log(json_encode($photo_to_place));
 
+	$cover_image_size = array(851,315);
+
 	// The text to draw
 	$font_size = 21;
 	$font_size_share = 16;
@@ -743,12 +953,12 @@ function cropImageMultiple($cropdata,$title_text,$background_color = "#81a99e"){
 		$font_size_share = 13;
 	}
 
-	$backimage = MAIN_DIRECTORY . "images/fyi_background_gradient.png";
+	$backimage = MAIN_DIRECTORY . "images/fyi_background_gradient-none.png";
 
 	$background_gradient = imagecreatefrompng($backimage);
 
 	//create new final image and fill with a color
-	$finalimage = imagecreatetruecolor(849,313);
+	$finalimage = imagecreatetruecolor($cover_image_size[0],$cover_image_size[1]);
 	$finalimage_share = imagecreatetruecolor(500,500);
 
 	$stripped_color_hex  = preg_replace("/#/i","",$background_color);
@@ -763,7 +973,9 @@ function cropImageMultiple($cropdata,$title_text,$background_color = "#81a99e"){
 	imagefill($finalimage_share, 0, 0, $final_background_color);
 	
 	//creates photo placement montage image base at reduced size
-	$photo_placements = imagecreatetruecolor(724,268);
+	//$photo_placements = imagecreatetruecolor(724,268);
+	$photo_placements = imagecreatetruecolor($cover_image_size[0],$cover_image_size[1]);
+
 	//saves alpha of said image
     imagesavealpha($photo_placements, true);
 
@@ -775,7 +987,7 @@ function cropImageMultiple($cropdata,$title_text,$background_color = "#81a99e"){
 	
     imagecopyresampled($finalimage_share, $background_gradient, 0, 0, 0, 0, 500, 500, $back_gradient_image_size[0], $back_gradient_image_size[1]);
 
-
+    //placing of cropped imagery onto final image
 	foreach($photo_to_place as $fi){
 
 		//if no place after
@@ -793,18 +1005,21 @@ function cropImageMultiple($cropdata,$title_text,$background_color = "#81a99e"){
 			imagecopyresampled($finalimage_share,$temp_image,$f_pos[0],$f_pos[1], 0, 0,$f_dim[0],$f_dim[1],$temp_image_size[0],$temp_image_size[1]);		
 
 			imagedestroy($temp_image);
+			//deleteImageFile($image_path);
 		}
 	}
 
 	//add gradient over color background
-	imagecopy($finalimage, $background_gradient, 0, 0, 0, 0, $back_gradient_image_size[0], $back_gradient_image_size[1]);
+	//imagecopy($finalimage, $background_gradient, 0, 0, 0, 0, $back_gradient_image_size[0], $back_gradient_image_size[1]);
 
 	//resizes photo placement to fit in final image space
-	imagecopyresampled($finalimage,$photo_placements,0,0,0,0,$final_image_size[0],$final_image_size[1],724,268);
+	//imagecopyresampled($finalimage,$photo_placements,0,0,0,0,$final_image_size[0],$final_image_size[1],724,268);
+	imagecopyresampled($finalimage,$photo_placements,0,0,0,0,$final_image_size[0],$final_image_size[1],$cover_image_size[0],$cover_image_size[1]);
 
+	//elements placed after cropped imagery
 	foreach($photo_to_place as $fi){
 
-		//if no place after
+		//if place after
 		if($fi[2]){
 
 			$image_path = $fi[0];
@@ -833,7 +1048,6 @@ function cropImageMultiple($cropdata,$title_text,$background_color = "#81a99e"){
 			imagecopyresampled($finalimage_share,$temp_image,$f_pos[0],$f_pos[1], 0, 0,$f_dim[0],$f_dim[1],$temp_image_size[0],$temp_image_size[1]);	
 
 			imagedestroy($temp_image);
-			
 		}
 	}
 
@@ -955,14 +1169,14 @@ function postImageToFacebookProfile($photo){
 			if(version_compare(PHP_VERSION, '5.5') >= 0) {
 				$postfields = array(
 				    "access_token" => $_SESSION["access_token"],
-				    "message" => "Photo Test",
+				    //"message" => "Photo Test",
 				    "image"=> new CurlFile($phototopublish,'image/jpeg',$upload_file_name)
 				);
 			}
 			else{
 				$postfields = array(
 				    "access_token" => $_SESSION["access_token"],
-				    "message" => "Photo Test",
+				    //"message" => "Photo Test",
 				    "image"=> "@" . $phototopublish
 				);
 			}
@@ -1004,7 +1218,7 @@ function uploadObjectToAmazon($key_filename,$source_file){
 
 	$result = $client->putObject(array(
 		'ACL' => 'public-read',
-	    'Bucket'     => "assets.somebucket.com/composed_images",
+	    'Bucket'     => "amazon.bucket.goes.here",
 	    'Key'        => $key_filename,
 	    'SourceFile' => $source_file
 	));
@@ -1041,7 +1255,8 @@ if(isset($_POST["action"])){
 		break;
 
 		case "get_most_popular_photos":
-			getMostPopularPhotos();
+			//getMostPopularPhotos();
+			getMostPopularPhotos_v2();
 		break;
 
 		case "get_ac_token":
